@@ -1,0 +1,35 @@
+select 
+beginsd now, qRuns, qTime, tName, trxStarted, trxTime, rows, modified, locked, hoursLeftL, estimatedEndL, modifiedPerSecL, avgRows, estimatedEndG, modifiedPerSecG, hoursLeftG
+from (
+select 
+    (@tname:='<table>') tName,
+    @beginsd:=sysdate() beginsd,
+    @trxStarted:=(select trx_started from information_schema.innodb_trx where trx_query like concat('alter table %', @tname, '%')) trxStarted, 
+    @trxTime:=timediff(@beginsd, @trxStarted) trxTime,
+    @rows:=(select table_rows from information_schema.tables where table_name like @tname) rows,
+    @runs:=(ifnull(@runs, 0)+1) qRuns,
+    @rowsSum:=(ifnull(@rowsSum, 0)+@rows),
+    round(@avgRows:=(@rowsSum / @runs)) avgRows,
+    @modified:=(select trx_rows_modified from information_schema.innodb_trx where trx_query like concat('alter table %', @tname, '%')) modified, 
+    @rowsLeftL:=(cast(@rows as signed) - cast(@modified as signed)) rowsLeftL,
+    round(@rowsLeftG:=(cast(@avgRows as signed) - cast(@modified as signed)), 2) rowsLeftG,
+    @locked:=(select trx_rows_locked from information_schema.innodb_trx where trx_query like concat('alter table %', @tname, '%')) locked,
+    @endsd:=sysdate() endsd,
+    --
+    time_to_sec(timediff(@endsd, @beginsd)) qTime,
+    @modifiedInc:=(cast(@modified as signed) - cast(@p_modified as signed)) modifiedInc,
+    @timeInc:=time_to_sec(timediff(@beginsd, @p_beginsd)) timeInc,
+    round(@modifiedPerSecL:=(@modifiedInc/@timeInc)) modifiedPerSecL,
+    round(@modifiedPerSecG:=(@modified/time_to_sec(@trxTime))) modifiedPerSecG,
+    round(@minutesLeftL := (@rowsLeftL / @modifiedPerSecL / 60)) minutesLeftL,
+    round(@minutesLeftG := (@rowsLeftG / @modifiedPerSecG / 60)) minutesLeftG,
+    round(@hoursLeftL := (@minutesLeftL / 60), 2) hoursLeftL,
+    round(@hoursLeftG := (@minutesLeftG / 60), 2) hoursLeftG,
+    (@beginsd + INTERVAL @minutesLeftL MINUTE) estimatedEndL,
+    (@beginsd + INTERVAL @minutesLeftG MINUTE) estimatedEndG,
+    --
+    @p_rows:=@rows,
+    @p_modified:=@modified,
+    @p_beginsd:=@beginsd
+) sq;
+    
